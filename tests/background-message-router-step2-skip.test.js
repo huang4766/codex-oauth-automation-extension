@@ -331,7 +331,11 @@ test('message router finalizes step 3 before marking it completed', async () => 
       },
     },
   ]);
-assert.deepStrictEqual(response, { ok: true });
+  assert.equal(
+    events.logs.some(({ message, step }) => /诊断：收到步骤 3 完成信号/.test(message) && step === 3),
+    true
+  );
+  assert.deepStrictEqual(response, { ok: true });
 });
 
 test('message router saves runtime signup phone from sidepanel message', async () => {

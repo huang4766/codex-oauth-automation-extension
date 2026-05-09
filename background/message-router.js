@@ -625,6 +625,31 @@
             return { ok: true };
           }
           try {
+            const completionStateSnapshot = typeof getState === 'function' ? await getState() : {};
+            const payload = message.payload || {};
+            const snapshotSummary = {
+              stepStatuses: completionStateSnapshot?.stepStatuses || {},
+              email: String(completionStateSnapshot?.email || '').trim(),
+              signupVerificationRequestedAt: completionStateSnapshot?.signupVerificationRequestedAt ?? null,
+              loginVerificationRequestedAt: completionStateSnapshot?.loginVerificationRequestedAt ?? null,
+            };
+            const payloadSummary = {
+              payloadKeys: Object.keys(payload),
+              skipProfileStep: Boolean(payload?.skipProfileStep),
+              skipProfileStepReason: String(payload?.skipProfileStepReason || '').trim(),
+              deferredSubmit: Boolean(payload?.deferredSubmit),
+              signupVerificationRequestedAt: payload?.signupVerificationRequestedAt ?? null,
+              loginVerificationRequestedAt: payload?.loginVerificationRequestedAt ?? null,
+            };
+            await addLog(
+              `诊断：收到步骤 ${message.step} 完成信号。payload=${JSON.stringify(payloadSummary)}；state=${JSON.stringify(snapshotSummary)}`,
+              'info',
+              { step: message.step }
+            );
+          } catch {
+            // Ignore diagnostic logging failures.
+          }
+          try {
             if (message.step === 3 && typeof finalizeStep3Completion === 'function') {
               await finalizeStep3Completion(message.payload || {});
             }

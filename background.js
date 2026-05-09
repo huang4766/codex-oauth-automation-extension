@@ -9391,6 +9391,15 @@ async function executeStepAndWait(step, delayAfter = 2000) {
   if (step === 5) {
     const signupTabId = await getTabId('signup-page');
     if (signupTabId) {
+      const latestSignupTab = typeof chrome?.tabs?.get === 'function'
+        ? await chrome.tabs.get(signupTabId).catch(() => null)
+        : null;
+      const latestStateAfterStep5 = await getState();
+      await addLog(
+        `诊断：步骤 5 完成后当前认证页 URL=${latestSignupTab?.url || 'unknown'}；stepStatuses=${JSON.stringify(latestStateAfterStep5?.stepStatuses || {})}`,
+        'info',
+        { step: 5 }
+      );
       await addLog('自动运行：步骤 5 已收到完成信号，正在等待当前页面完成加载并稳定...', 'info');
       await waitForTabStableComplete(signupTabId, {
         timeoutMs: 30000,
@@ -10519,12 +10528,21 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
           await restartSignupPhonePasswordMismatchAttemptFromStep(4, step4RestartCount, err);
         } else {
           const preservedState = await getState();
+          const currentSignupTabId = await getTabId('signup-page');
+          const currentSignupTab = currentSignupTabId && typeof chrome?.tabs?.get === 'function'
+            ? await chrome.tabs.get(currentSignupTabId).catch(() => null)
+            : null;
           const preservedEmail = String(preservedState.email || '').trim();
           const preservedPassword = String(preservedState.password || '').trim();
           const emailSuffix = preservedEmail ? `当前邮箱：${preservedEmail}；` : '';
           await addLog(
             `步骤 4：执行失败，准备沿用当前邮箱回到步骤 1 重新开始（第 ${step4RestartCount} 次重开）。${emailSuffix}原因：${getErrorMessage(err)}`,
             'warn'
+          );
+          await addLog(
+            `诊断：步骤 4 触发回到步骤 1 前，当前认证页 URL=${currentSignupTab?.url || 'unknown'}；stepStatuses=${JSON.stringify(preservedState?.stepStatuses || {})}`,
+            'warn',
+            { step: 4 }
           );
           await invalidateDownstreamAfterStepRestart(1, {
             logLabel: `步骤 4 报错后准备回到步骤 1 沿用当前邮箱重试（第 ${step4RestartCount} 次重开）`,
@@ -10550,6 +10568,11 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
             ? getAuthChainStartStepId(await getState())
             : FINAL_OAUTH_CHAIN_START_STEP);
         const resetAfterStep = Math.max(1, restartStep - 1);
+        const latestStateBeforeRestart = await getState();
+        const currentSignupTabId = await getTabId('signup-page');
+        const currentSignupTab = currentSignupTabId && typeof chrome?.tabs?.get === 'function'
+          ? await chrome.tabs.get(currentSignupTabId).catch(() => null)
+          : null;
         const authState = restartDecision.authState;
         const authStateLabel = authState?.state ? getLoginAuthStateLabel(authState.state) : '未知页面';
         const authStateSuffix = authState?.url
@@ -10560,6 +10583,11 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
         await addLog(
           `步骤 ${step}：检测到报错且当前未进入 add-phone，正在回到步骤 ${restartStep} 重新开始授权流程（第 ${postStep7RestartCount} 次重开）。${authStateSuffix}；原因：${restartDecision.errorMessage || '未知错误'}`,
           'warn'
+        );
+        await addLog(
+          `诊断：步骤 ${step} 准备回到步骤 ${restartStep} 前，signupTabUrl=${currentSignupTab?.url || 'unknown'}；stepStatuses=${JSON.stringify(latestStateBeforeRestart?.stepStatuses || {})}`,
+          'warn',
+          { step }
         );
         await invalidateDownstreamAfterStepRestart(resetAfterStep, {
           logLabel: `步骤 ${step} 报错后准备回到步骤 ${restartStep} 重试（第 ${postStep7RestartCount} 次重开）`,
