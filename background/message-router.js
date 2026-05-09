@@ -425,6 +425,16 @@
         }
         case 2:
           await syncStepAccountIdentityFromPayload(payload);
+          try {
+            const latestState = await getState();
+            await addLog(
+              `诊断：步骤 2 完成后落地页 state=${String(payload.nextSignupState || '').trim() || 'unknown'}；url=${String(payload.nextSignupUrl || '').trim() || 'unknown'}；accountIdentifierType=${String(payload.accountIdentifierType || '').trim() || 'unknown'}；resolvedSignupMethod=${String(latestState?.resolvedSignupMethod || '').trim() || 'unknown'}`,
+              'info',
+              { step: 2 }
+            );
+          } catch {
+            // Ignore diagnostic logging failures.
+          }
           if (payload.skipRegistrationFlow) {
             const latestState = await getState();
             for (const skipStep of [3, 4, 5]) {

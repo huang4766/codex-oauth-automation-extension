@@ -167,6 +167,7 @@ test('message router skips step 3 when step 2 lands on verification page', async
   assert.deepStrictEqual(events.emailStates, ['user@example.com']);
   assert.deepStrictEqual(events.stepStatuses, [{ step: 3, status: 'skipped' }]);
   assert.equal(events.logs[0]?.message, '步骤 2：提交邮箱后页面直接进入验证码页，已自动跳过步骤 3。');
+  assert.equal(events.logs.some(({ message, step }) => /诊断：步骤 2 完成后落地页 state=/.test(message) && step === 2), true);
 });
 
 test('message router syncs signup phone runtime state from step 2 payload immediately', async () => {
