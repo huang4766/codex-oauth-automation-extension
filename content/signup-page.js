@@ -30,6 +30,7 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
       || message.type === 'ENSURE_SIGNUP_ENTRY_READY'
       || message.type === 'ENSURE_SIGNUP_PHONE_ENTRY_READY'
       || message.type === 'ENSURE_SIGNUP_PASSWORD_PAGE_READY'
+      || message.type === 'GET_SIGNUP_ENTRY_STATE'
     ) {
       resetStopState();
       handleCommand(message).then((result) => {
@@ -82,6 +83,8 @@ async function handleCommand(message) {
       return await submitAddEmailAndContinue(message.payload);
     case 'PREPARE_SIGNUP_VERIFICATION':
       return await prepareSignupVerificationFlow(message.payload);
+    case 'GET_SIGNUP_ENTRY_STATE':
+      return inspectSignupEntryState();
     case 'RECOVER_AUTH_RETRY_PAGE':
       return await recoverCurrentAuthRetryPage(message.payload);
     case 'RESEND_VERIFICATION_CODE':
@@ -2694,6 +2697,21 @@ function isLikelyLoggedInChatgptHomeUrl(rawUrl = location.href) {
         if (enabled) {
           return false;
         }
+      }
+
+      const bodyText = typeof getPageTextSnapshot === 'function'
+        ? getPageTextSnapshot()
+        : String(document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ').trim();
+      const loggedInHomeSignals = [
+        /新聊天|new\s+chat/i,
+        /搜索聊天|search\s+chats?/i,
+        /项目|projects?/i,
+        /今天有什么计划|what'?s?\s+on\s+the\s+agenda/i,
+        /有问题，尽管问|ask\s+anything/i,
+      ];
+      const matchedSignals = loggedInHomeSignals.filter((pattern) => pattern.test(bodyText));
+      if (matchedSignals.length >= 2) {
+        return true;
       }
     }
 

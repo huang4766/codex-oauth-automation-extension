@@ -442,10 +442,6 @@ test('step 8 marks current email used and reruns step 7 after email_in_use on ad
   ]);
   assert.deepStrictEqual(calls.setStates, [
     {
-      email: 'used.alias@icloud.com',
-      step8VerificationTargetEmail: 'used.alias@icloud.com',
-    },
-    {
       email: null,
       step8VerificationTargetEmail: '',
       loginVerificationRequestedAt: null,

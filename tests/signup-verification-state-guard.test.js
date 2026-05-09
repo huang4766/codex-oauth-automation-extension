@@ -96,6 +96,58 @@ return {
   assert.equal(api.run(), false);
 });
 
+test('logged-in chatgpt onboarding/home shell is treated as logged_in_home without visible signup entry', () => {
+const api = new Function(`
+const location = { href: 'https://chatgpt.com/' };
+const document = {
+  body: {
+    innerText: '新聊天 搜索聊天 项目 今天有什么计划？ 有问题，尽管问',
+    textContent: '新聊天 搜索聊天 项目 今天有什么计划？ 有问题，尽管问',
+  },
+  querySelectorAll(selector) {
+    if (selector === 'a, button, [role="button"], [role="link"], input[type="button"], input[type="submit"]') {
+      return [];
+    }
+    return [];
+  },
+};
+
+function findSignupEntryTrigger() {
+  return null;
+}
+
+function getActionText(el) {
+  return [el?.textContent, el?.value, el?.getAttribute?.('aria-label'), el?.getAttribute?.('title')]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\\s+/g, ' ')
+    .trim();
+}
+
+function getPageTextSnapshot() {
+  return String(document.body?.innerText || document.body?.textContent || '').replace(/\\s+/g, ' ').trim();
+}
+
+function isVisibleElement() {
+  return true;
+}
+
+function isActionEnabled(el) {
+  return Boolean(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+}
+
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+
+return {
+  run() {
+    return isLikelyLoggedInChatgptHomeUrl();
+  },
+};
+`)();
+
+  assert.equal(api.run(), true);
+});
+
 test('signup verification state should prioritize retry error page over verification visibility', () => {
   const api = new Function(`
 const location = {

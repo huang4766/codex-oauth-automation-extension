@@ -115,6 +115,7 @@
       setPersistentSettings,
       setState,
       setStepStatus,
+      sendToContentScriptResilient,
       skipAutoRunCountdown,
       skipStep,
       startContributionFlow,
@@ -513,6 +514,35 @@
       }
     }
 
+    function isStep3FinalizeFallbackState(state = '') {
+      const normalized = String(state || '').trim().toLowerCase();
+      return normalized === 'verification_page'
+        || normalized === 'phone_verification_page'
+        || normalized === 'profile_page'
+        || normalized === 'logged_in_home';
+    }
+
+    async function inspectStep3PostSubmitFallback() {
+      if (typeof sendToContentScriptResilient !== 'function') {
+        return null;
+      }
+      const result = await sendToContentScriptResilient('signup-page', {
+        type: 'GET_SIGNUP_ENTRY_STATE',
+        source: 'background',
+        payload: {},
+      }, {
+        timeoutMs: 12000,
+        responseTimeoutMs: 12000,
+        retryDelayMs: 600,
+        logMessage: '步骤 3：正在复核密码提交后的页面状态...',
+        logStep: 3,
+      });
+      if (result?.error) {
+        throw new Error(result.error);
+      }
+      return result || null;
+    }
+
     async function handleMessage(message, sender) {
       switch (message.type) {
         case 'CONTENT_SCRIPT_READY': {
@@ -558,12 +588,35 @@
               notifyStepError(message.step, '流程已被用户停止。');
               return { ok: true, error: userMessage };
             }
-            const errorMessage = error?.message || String(error || '步骤 3 提交后确认失败');
-            await setStepStatus(message.step, 'failed');
-            await addLog(`失败：${errorMessage}`, 'error', { step: message.step });
-            await appendManualAccountRunRecordIfNeeded(`step${message.step}_failed`, null, errorMessage);
-            notifyStepError(message.step, errorMessage);
-            return { ok: true, error: errorMessage };
+            if (message.step === 3) {
+              try {
+                const fallbackState = await inspectStep3PostSubmitFallback();
+                if (isStep3FinalizeFallbackState(fallbackState?.state)) {
+                  await addLog(
+                    `步骤 3：密码提交后的收尾确认失败，但当前页面已进入 ${fallbackState.state}，按步骤 3 已完成继续。`,
+                    'warn',
+                    { step: 3 }
+                  );
+                } else {
+                  throw error;
+                }
+              } catch (fallbackError) {
+                const effectiveError = fallbackError === error ? error : fallbackError;
+                const errorMessage = effectiveError?.message || String(effectiveError || '步骤 3 提交后确认失败');
+                await setStepStatus(message.step, 'failed');
+                await addLog(`失败：${errorMessage}`, 'error', { step: message.step });
+                await appendManualAccountRunRecordIfNeeded(`step${message.step}_failed`, null, errorMessage);
+                notifyStepError(message.step, errorMessage);
+                return { ok: true, error: errorMessage };
+              }
+            } else {
+              const errorMessage = error?.message || String(error || '步骤 3 提交后确认失败');
+              await setStepStatus(message.step, 'failed');
+              await addLog(`失败：${errorMessage}`, 'error', { step: message.step });
+              await appendManualAccountRunRecordIfNeeded(`step${message.step}_failed`, null, errorMessage);
+              notifyStepError(message.step, errorMessage);
+              return { ok: true, error: errorMessage };
+            }
           }
 
           const completionStateCandidate = await getState();

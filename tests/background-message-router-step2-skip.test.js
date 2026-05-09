@@ -131,6 +131,7 @@ function createRouter(overrides = {}) {
     setLuckmailPurchasePreservedState: async () => {},
     setLuckmailPurchaseUsedState: async () => {},
     setPersistentSettings: async () => {},
+    sendToContentScriptResilient: overrides.sendToContentScriptResilient || (async () => ({ state: 'password_page' })),
     setState: async (updates) => {
       events.stateUpdates.push(updates);
     },
@@ -416,6 +417,7 @@ test('message router marks step 3 failed when post-submit finalize fails', async
     finalizeStep3Completion: async () => {
       throw new Error('步骤 3 提交后仍停留在密码页。');
     },
+    sendToContentScriptResilient: async () => ({ state: 'password_page' }),
   });
 
   const response = await router.handleMessage({
@@ -436,6 +438,43 @@ test('message router marks step 3 failed when post-submit finalize fails', async
   ]);
   assert.equal(events.logs.some(({ message, step }) => /失败：步骤 3 提交后仍停留在密码页。/.test(message) && step === 3), true);
   assert.deepStrictEqual(response, { ok: true, error: '步骤 3 提交后仍停留在密码页。' });
+});
+
+test('message router treats step 3 as completed when finalize fails but page already advanced', async () => {
+  const { router, events } = createRouter({
+    finalizeStep3Completion: async () => {
+      throw new Error('步骤 3：认证页在提交后切换过程中页面通信超时，未能重新就绪。');
+    },
+    sendToContentScriptResilient: async () => ({
+      state: 'profile_page',
+      url: 'https://auth.openai.com/create-account/profile',
+    }),
+  });
+
+  const response = await router.handleMessage({
+    type: 'STEP_COMPLETE',
+    step: 3,
+    source: 'signup-page',
+    payload: {
+      email: 'user@example.com',
+    },
+  }, {});
+
+  assert.deepStrictEqual(events.stepStatuses, [{ step: 3, status: 'completed' }]);
+  assert.equal(
+    events.logs.some(({ message, step }) => /步骤 3：密码提交后的收尾确认失败，但当前页面已进入 profile_page/.test(message) && step === 3),
+    true
+  );
+  assert.deepStrictEqual(events.notifyErrors, []);
+  assert.deepStrictEqual(events.notifyCompletions, [
+    {
+      step: 3,
+      payload: {
+        email: 'user@example.com',
+      },
+    },
+  ]);
+  assert.deepStrictEqual(response, { ok: true });
 });
 
 test('message router does not duplicate step 3 mismatch failure log after finalize already failed', async () => {

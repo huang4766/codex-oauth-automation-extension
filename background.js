@@ -11188,6 +11188,7 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   setLuckmailPurchasePreservedState,
   setLuckmailPurchaseUsedState,
   setPersistentSettings,
+  sendToContentScriptResilient,
   setState,
   setStepStatus,
   skipAutoRunCountdown,
