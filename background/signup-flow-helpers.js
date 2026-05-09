@@ -110,6 +110,26 @@
       return '';
     }
 
+    function isLikelyLoggedInChatgptHomeUrl(rawUrl) {
+      const parsed = parseUrlSafely(rawUrl);
+      if (!parsed) {
+        return false;
+      }
+
+      const host = String(parsed.hostname || '').toLowerCase();
+      if (!['chatgpt.com', 'www.chatgpt.com', 'chat.openai.com'].includes(host)) {
+        return false;
+      }
+
+      const path = String(parsed.pathname || '');
+      if (/^\/(?:auth\/|create-account\/|email-verification|log-in|add-phone)(?:[/?#]|$)/i.test(path)) {
+        return false;
+      }
+
+      return path === '/'
+        || /^\/c\/[a-f0-9-]+(?:[/?#]|$)/i.test(path);
+    }
+
     async function ensureSignupPostIdentityPageReadyInTab(tabId, step = 2, options = {}) {
       const { skipUrlWait = false } = options;
       let landingUrl = '';
@@ -216,6 +236,21 @@
         throw new Error(`认证页面标签页已关闭，无法完成步骤 ${step} 的提交后确认。`);
       }
 
+      try {
+        const currentTab = await chrome.tabs.get(tabId);
+        if (isLikelyLoggedInChatgptHomeUrl(currentTab?.url || '')) {
+          return {
+            ready: true,
+            state: 'logged_in_home',
+            url: currentTab?.url || '',
+            skipProfileStep: true,
+            via: 'tab_url_before_finalize',
+          };
+        }
+      } catch {
+        // Ignore tab inspection failures here and continue with the normal finalize path.
+      }
+
       await ensureContentScriptReadyOnTab('signup-page', tabId, {
         inject: SIGNUP_PAGE_INJECT_FILES,
         injectSource: 'signup-page',
@@ -242,6 +277,20 @@
         });
       } catch (error) {
         if (isRetryableContentScriptTransportError(error)) {
+          try {
+            const currentTab = await chrome.tabs.get(tabId);
+            if (isLikelyLoggedInChatgptHomeUrl(currentTab?.url || '')) {
+              return {
+                ready: true,
+                state: 'logged_in_home',
+                url: currentTab?.url || '',
+                skipProfileStep: true,
+                via: 'tab_url_after_retryable_finalize_error',
+              };
+            }
+          } catch {
+            // Ignore tab inspection failures and fall through to the original retryable error.
+          }
           const message = `步骤 ${step}：认证页在提交后切换过程中页面通信超时，未能重新就绪，暂时无法确认是否进入下一页面。请重试当前轮。`;
           if (typeof addLog === 'function') {
             await addLog(message, 'warn');

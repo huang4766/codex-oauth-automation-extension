@@ -739,3 +739,44 @@ test('signup flow helper rewrites retryable step 3 finalize transport timeout in
     },
   ]);
 });
+
+test('signup flow helper treats chatgpt home url as successful step 3 finalize when transport retries fail', async () => {
+  const logs = [];
+
+  const helpers = signupFlowApi.createSignupFlowHelpers({
+    addLog: async (message, level = 'info') => {
+      logs.push({ message, level });
+    },
+    buildGeneratedAliasEmail: () => '',
+    chrome: { tabs: { get: async () => ({ id: 31, url: 'https://chatgpt.com/' }) } },
+    ensureContentScriptReadyOnTab: async () => {},
+    ensureHotmailAccountForFlow: async () => ({}),
+    ensureLuckmailPurchaseForFlow: async () => ({}),
+    isGeneratedAliasProvider: () => false,
+    isReusableGeneratedAliasEmail: () => false,
+    isHotmailProvider: () => false,
+    isRetryableContentScriptTransportError: () => true,
+    isLuckmailProvider: () => false,
+    isSignupEmailVerificationPageUrl: () => false,
+    isSignupPasswordPageUrl: () => true,
+    reuseOrCreateTab: async () => 31,
+    sendToContentScriptResilient: async () => {
+      throw new Error('Could not establish connection. Receiving end does not exist.');
+    },
+    setEmailState: async () => {},
+    SIGNUP_ENTRY_URL: 'https://chatgpt.com/',
+    SIGNUP_PAGE_INJECT_FILES: ['content/utils.js', 'content/signup-page.js'],
+    waitForTabUrlMatch: async () => null,
+  });
+
+  const result = await helpers.finalizeSignupPasswordSubmitInTab(31, 'Secret123!', 3);
+
+  assert.deepStrictEqual(result, {
+    ready: true,
+    state: 'logged_in_home',
+    url: 'https://chatgpt.com/',
+    skipProfileStep: true,
+    via: 'tab_url_before_finalize',
+  });
+  assert.deepStrictEqual(logs, []);
+});
