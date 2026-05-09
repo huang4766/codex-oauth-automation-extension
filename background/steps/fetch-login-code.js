@@ -25,6 +25,7 @@
       isTabAlive,
       isVerificationMailPollingError,
       LUCKMAIL_PROVIDER,
+      markCurrentRegistrationAccountUsed,
       resolveSignupEmailForFlow,
       resolveVerificationStep,
       rerunStep7ForStep8Recovery,
@@ -580,8 +581,22 @@
               throw currentError;
             }
             if (isStep8EmailInUseError(currentError)) {
+              if (typeof markCurrentRegistrationAccountUsed === 'function') {
+                await markCurrentRegistrationAccountUsed(currentState, {
+                  logPrefix: '步骤 8：email_in_use',
+                  level: 'warn',
+                });
+              }
               await resetStep8AfterEmailInUse(currentState, visibleStep);
-              await openStep8AddEmailPage(currentState, visibleStep, 'email_in_use');
+              await addLog(
+                `步骤 ${visibleStep}：当前邮箱已标记为已用，准备回到步骤 ${authLoginStep} 按既有策略重新获取邮箱并发起登录流程。`,
+                'warn'
+              );
+              await rerunStep7ForStep8Recovery({
+                logMessage: `当前邮箱已被占用，正在回到步骤 ${authLoginStep} 重新获取邮箱并发起登录流程...`,
+                logStep: visibleStep,
+                logStepKey: 'fetch-login-code',
+              });
             } else {
               await resetStep8AfterMaxCheckAttempts(visibleStep);
               await openStep8AddEmailPage(currentState, visibleStep, 'max_check_attempts');

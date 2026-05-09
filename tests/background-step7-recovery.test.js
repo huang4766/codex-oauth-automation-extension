@@ -352,6 +352,114 @@ test('step 8 submits add-email before polling the email verification code', asyn
   ]);
 });
 
+test('step 8 marks current email used and reruns step 7 after email_in_use on add-email page', async () => {
+  const calls = {
+    markUsed: [],
+    rerunStep7: [],
+    setStates: [],
+    resolveCalls: 0,
+  };
+
+  const executor = api.createStep8Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    confirmCustomVerificationStepBypass: async () => {},
+    ensureStep8VerificationPageReady: async () => ({ state: 'add_email_page', url: 'https://auth.openai.com/add-email' }),
+    getOAuthFlowRemainingMs: async () => 5000,
+    getOAuthFlowStepTimeoutMs: async (defaultTimeoutMs) => defaultTimeoutMs,
+    getMailConfig: () => ({
+      provider: 'icloud',
+      label: 'iCloud',
+      source: 'icloud-mail',
+      url: 'https://www.icloud.com/mail',
+      navigateOnReuse: false,
+    }),
+    getState: async () => ({
+      email: null,
+      password: 'secret',
+      oauthUrl: 'https://oauth.example/latest',
+    }),
+    getTabId: async (sourceName) => (sourceName === 'signup-page' ? 1 : 2),
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isTabAlive: async () => true,
+    isVerificationMailPollingError: () => false,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    markCurrentRegistrationAccountUsed: async (state, options) => {
+      calls.markUsed.push({ state, options });
+    },
+    resolveSignupEmailForFlow: async () => 'used.alias@icloud.com',
+    resolveVerificationStep: async () => {
+      calls.resolveCalls += 1;
+    },
+    rerunStep7ForStep8Recovery: async (options) => {
+      calls.rerunStep7.push(options || null);
+      throw new Error('RERUN_MARKER');
+    },
+    reuseOrCreateTab: async () => {},
+    sendToContentScriptResilient: async () => {
+      throw new Error('STEP8_EMAIL_IN_USE::email_in_use on add-email verification page; choose a different email.');
+    },
+    setState: async (payload) => {
+      calls.setStates.push(payload);
+    },
+    shouldUseCustomRegistrationEmail: () => false,
+    STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS: 25000,
+    STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS: 8,
+    throwIfStopped: () => {},
+  });
+
+  await assert.rejects(
+    () => executor.executeStep8({
+      visibleStep: 8,
+      email: 'used.alias@icloud.com',
+      password: 'secret',
+      oauthUrl: 'https://oauth.example/latest',
+      mailProvider: 'icloud',
+    }),
+    /RERUN_MARKER/
+  );
+
+  assert.equal(calls.resolveCalls, 0);
+  assert.deepStrictEqual(calls.markUsed, [
+    {
+      state: {
+        visibleStep: 8,
+        email: 'used.alias@icloud.com',
+        password: 'secret',
+        oauthUrl: 'https://oauth.example/latest',
+        mailProvider: 'icloud',
+      },
+      options: {
+        logPrefix: '步骤 8：email_in_use',
+        level: 'warn',
+      },
+    },
+  ]);
+  assert.deepStrictEqual(calls.setStates, [
+    {
+      email: 'used.alias@icloud.com',
+      step8VerificationTargetEmail: 'used.alias@icloud.com',
+    },
+    {
+      email: null,
+      step8VerificationTargetEmail: '',
+      loginVerificationRequestedAt: null,
+    },
+  ]);
+  assert.deepStrictEqual(calls.rerunStep7, [
+    {
+      logMessage: '当前邮箱已被占用，正在回到步骤 7 重新获取邮箱并发起登录流程...',
+      logStep: 8,
+      logStepKey: 'fetch-login-code',
+    },
+  ]);
+});
+
 test('Plus login-code step reuses step 8 verification logic but completes visible step 11', async () => {
   let resolvedStep = null;
   let resolvedOptions = null;
