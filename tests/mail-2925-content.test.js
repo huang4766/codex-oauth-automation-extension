@@ -124,6 +124,8 @@ function extractFunction(name) {
 
 test('handlePollEmail establishes a baseline after opening from detail view and only picks mail from a later refresh', async () => {
   const bundle = [
+    extractFunction('normalizeNodeText'),
+    extractFunction('buildMailPreviewSummary'),
     extractFunction('normalizeMinuteTimestamp'),
     extractFunction('handlePollEmail'),
   ].join('\n');
@@ -233,6 +235,8 @@ return {
 
 test('handlePollEmail keeps ignoring targetEmail when receive-mode matching is disabled', async () => {
   const bundle = [
+    extractFunction('normalizeNodeText'),
+    extractFunction('buildMailPreviewSummary'),
     extractFunction('normalizeMinuteTimestamp'),
     extractFunction('handlePollEmail'),
   ].join('\n');
@@ -318,10 +322,12 @@ return {
 
 test('handlePollEmail skips explicit mismatched target emails when receive-mode matching is enabled', async () => {
   const bundle = [
+    extractFunction('normalizeNodeText'),
     extractFunction('extractEmails'),
     extractFunction('extractForwardedTargetEmails'),
     extractFunction('emailMatchesTarget'),
     extractFunction('getTargetEmailMatchState'),
+    extractFunction('buildMailPreviewSummary'),
     extractFunction('normalizeMinuteTimestamp'),
     extractFunction('handlePollEmail'),
   ].join('\n');
@@ -409,6 +415,8 @@ return {
 
 test('handlePollEmail only accepts 2925 mails inside the fixed lookback window', async () => {
   const bundle = [
+    extractFunction('normalizeNodeText'),
+    extractFunction('buildMailPreviewSummary'),
     extractFunction('normalizeMinuteTimestamp'),
     extractFunction('handlePollEmail'),
   ].join('\n');
@@ -571,6 +579,7 @@ test('extractVerificationCode ignores compact header time before fallback code',
     extractFunction('extractStrictChatGPTVerificationCode'),
     extractFunction('isLikelyCompactTimeValue'),
     extractFunction('isLikelyHeaderTimestampCode'),
+    extractFunction('isLikelyEmailOrDomainEmbeddedCode'),
     extractFunction('findSafeStandaloneSixDigitCode'),
     extractFunction('extractVerificationCode'),
   ].join('\n');
@@ -590,6 +599,58 @@ return { extractVerificationCode };
   ].join('\n');
 
   assert.equal(api.extractVerificationCode(bodyText, false), '371138');
+});
+
+test('extractVerificationCode prefers OpenAI temporary verification code in Chinese body over domain digits', () => {
+  const bundle = [
+    extractFunction('extractStrictChatGPTVerificationCode'),
+    extractFunction('isLikelyCompactTimeValue'),
+    extractFunction('isLikelyHeaderTimestampCode'),
+    extractFunction('isLikelyEmailOrDomainEmbeddedCode'),
+    extractFunction('findSafeStandaloneSixDigitCode'),
+    extractFunction('extractVerificationCode'),
+  ].join('\n');
+
+  const api = new Function(`
+${bundle}
+return { extractVerificationCode };
+`)();
+
+  const bodyText = [
+    '你的 OpenAI 临时验证码',
+    '发件人：noreply<noreply@tm.openai.com>',
+    '(由 cfbounces+ndrdrop@hl4766902.asia 代发)',
+    '收件人：16xy2i1xmm<16xy2i1xmm@hl4766902.asia>',
+    '输入此临时验证码以继续：',
+    '',
+    '274032',
+    '',
+    '如果你未尝试将电子邮件地址关联到你的帐户，请忽略此电子邮件。',
+  ].join('\n');
+
+  assert.equal(api.extractVerificationCode(bodyText, false), '274032');
+});
+
+test('findSafeStandaloneSixDigitCode ignores six digits embedded in local domain names', () => {
+  const bundle = [
+    extractFunction('isLikelyCompactTimeValue'),
+    extractFunction('isLikelyHeaderTimestampCode'),
+    extractFunction('isLikelyEmailOrDomainEmbeddedCode'),
+    extractFunction('findSafeStandaloneSixDigitCode'),
+  ].join('\n');
+
+  const api = new Function(`
+${bundle}
+return { findSafeStandaloneSixDigitCode };
+`)();
+
+  const bodyText = [
+    '发件人：noreply<noreply@tm.openai.com>',
+    '(由 cfbounces+ndrdrop@hl4766902.asia 代发)',
+    '收件人：16xy2i1xmm<16xy2i1xmm@hl4766902.asia>',
+  ].join('\n');
+
+  assert.equal(api.findSafeStandaloneSixDigitCode(bodyText), null);
 });
 
 test('openMailAndGetMessageText always returns to inbox after opening a 2925 message', async () => {

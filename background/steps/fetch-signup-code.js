@@ -68,6 +68,30 @@
         || Boolean(state?.signupPhoneActivation);
     }
 
+    function isLikelyLoggedInChatgptHomeUrl(rawUrl) {
+      const url = String(rawUrl || '').trim();
+      if (!url) {
+        return false;
+      }
+
+      try {
+        const parsed = new URL(url);
+        const host = String(parsed.hostname || '').toLowerCase();
+        if (!['chatgpt.com', 'www.chatgpt.com', 'chat.openai.com'].includes(host)) {
+          return false;
+        }
+
+        const path = String(parsed.pathname || '');
+        if (/^\/(?:auth\/|create-account\/|email-verification|log-in|add-phone)(?:[/?#]|$)/i.test(path)) {
+          return false;
+        }
+
+        return path === '/' || /^\/c\/[a-f0-9-]+(?:[/?#]|$)/i.test(path);
+      } catch {
+        return false;
+      }
+    }
+
     async function executeSignupPhoneCodeStep(state, signupTabId) {
       if (typeof phoneVerificationHelpers?.completeSignupPhoneVerificationFlow !== 'function') {
         throw new Error('步骤 4：手机号注册验证码流程不可用，接码模块尚未初始化。');
@@ -131,6 +155,20 @@
         });
       }
       throwIfStopped();
+
+      try {
+        const currentTab = typeof chrome?.tabs?.get === 'function'
+          ? await chrome.tabs.get(signupTabId)
+          : null;
+        if (isLikelyLoggedInChatgptHomeUrl(currentTab?.url || '')) {
+          await addLog('步骤 4：当前页面已进入 ChatGPT 已登录后续页，注册验证码步骤按已完成处理，并将跳过步骤 5。', 'warn');
+          await completeStepFromBackground(4, { skipProfileStep: true });
+          return;
+        }
+      } catch {
+        // Ignore tab inspection failures here and continue with the normal step 4 prepare flow.
+      }
+
       await addLog('步骤 4：正在确认注册验证码页面是否就绪，必要时自动恢复密码页超时报错...');
 
       const prepareRequest = {
@@ -166,6 +204,19 @@
         } catch (error) {
           if (!isRetryableContentScriptTransportError(error)) {
             throw error;
+          }
+
+          try {
+            const currentTab = typeof chrome?.tabs?.get === 'function'
+              ? await chrome.tabs.get(signupTabId)
+              : null;
+            if (isLikelyLoggedInChatgptHomeUrl(currentTab?.url || '')) {
+              await addLog('步骤 4：页面通信中断，但当前页面已进入 ChatGPT 已登录后续页，注册验证码步骤按已完成处理，并将跳过步骤 5。', 'warn');
+              await completeStepFromBackground(4, { skipProfileStep: true });
+              return;
+            }
+          } catch {
+            // Ignore tab inspection failures and continue the existing recovery path.
           }
 
           const remainingMs = Math.max(0, prepareTimeoutMs - (Date.now() - prepareStartAt));

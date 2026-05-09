@@ -623,6 +623,10 @@ function getMailItemText(item) {
   ].join(' ');
 }
 
+function buildMailPreviewSummary(text, maxLength = 120) {
+  return normalizeNodeText(String(text || '')).slice(0, Math.max(20, maxLength));
+}
+
 function getMailItemTimeText(item) {
   const timeEl = item?.querySelector('.date-time-text, [class*="date-time"], [class*="time"], td.time');
   return normalizeNodeText(timeEl?.textContent || '');
@@ -725,6 +729,33 @@ function isLikelyHeaderTimestampCode(text, index, value) {
     && (timeLike || /^20\d{4}$/.test(candidate));
 }
 
+function isLikelyEmailOrDomainEmbeddedCode(text, index, value) {
+  const source = String(text || '');
+  const candidate = String(value || '');
+  if (!candidate) return false;
+
+  const before = source.slice(Math.max(0, index - 64), index);
+  const after = source.slice(index + candidate.length, index + candidate.length + 64);
+  const immediateBefore = before.slice(-16);
+  const immediateAfter = after.slice(0, 32);
+  const compactBefore = immediateBefore.replace(/\s+/g, '');
+  const compactAfter = immediateAfter.replace(/\s+/g, '');
+
+  if (/[a-z0-9_-]$/i.test(compactBefore) && /^@/.test(compactAfter)) {
+    return true;
+  }
+
+  if (/[a-z]$/i.test(compactBefore) && /^\d+[a-z0-9.-]*\.[a-z]{2,}/i.test(compactAfter)) {
+    return true;
+  }
+
+  if (/[a-z0-9._%+-]@$/i.test(compactBefore) && /^[a-z0-9.-]+\.[a-z]{2,}/i.test(compactAfter)) {
+    return true;
+  }
+
+  return false;
+}
+
 function findSafeStandaloneSixDigitCode(text) {
   const normalized = String(text || '');
   const pattern = /\b(\d{6})\b/g;
@@ -732,7 +763,10 @@ function findSafeStandaloneSixDigitCode(text) {
 
   while ((match = pattern.exec(normalized)) !== null) {
     const candidate = match[1];
-    if (!isLikelyHeaderTimestampCode(normalized, match.index, candidate)) {
+    if (
+      !isLikelyHeaderTimestampCode(normalized, match.index, candidate)
+      && !isLikelyEmailOrDomainEmbeddedCode(normalized, match.index, candidate)
+    ) {
       return candidate;
     }
   }
@@ -749,7 +783,12 @@ function extractVerificationCode(text, strictChatGPTCodeOnly = false) {
 
   const normalized = String(text || '');
 
-  const matchCn = normalized.match(/(?:代码为|验证码[^0-9]*?)[\s：:]*(\d{6})/);
+  const matchCnTemporary = normalized.match(
+    /输入此?(?:临时)?验证码(?:以继续|继续|即可继续|完成验证)?[^0-9]{0,12}(\d{6})/i
+  );
+  if (matchCnTemporary) return matchCnTemporary[1];
+
+  const matchCn = normalized.match(/(?:代码为|验证码[^0-9]{0,24})[\s：:]*(\d{6})/);
   if (matchCn) return matchCn[1];
 
   const matchOpenAiLogin = normalized.match(/(?:chatgpt\s+log-?in\s+code|enter\s+this\s+code)[^0-9]{0,24}(\d{6})/i);
@@ -1226,43 +1265,51 @@ async function handlePollEmail(step, payload) {
         const item = items[index];
         const itemTimestamp = parseMailItemTimestamp(item);
         const itemMinute = normalizeMinuteTimestamp(itemTimestamp || 0);
+        const previewText = getMailItemText(item);
+        const previewSummary = buildMailPreviewSummary(previewText);
 
         if (filterAfterMinute && (!itemMinute || itemMinute < filterAfterMinute)) {
+          log(`步骤 ${step}：跳过第 ${index + 1} 封邮件，原因：时间早于筛选窗口。预览：${previewSummary}`, 'info');
           continue;
         }
 
-        const previewText = getMailItemText(item);
         if (!matchesMailFilters(previewText, senderFilters, subjectFilters)) {
+          log(`步骤 ${step}：跳过第 ${index + 1} 封邮件，原因：未命中发件人/主题筛选。预览：${previewSummary}`, 'info');
           continue;
         }
+        log(`步骤 ${step}：第 ${index + 1} 封邮件已命中筛选，准备打开正文。预览：${previewSummary}`, 'info');
         const previewTargetState = mail2925MatchTargetEmail
           ? getTargetEmailMatchState(previewText, targetEmail)
           : { matches: true, hasExplicitEmail: false };
         if (mail2925MatchTargetEmail && previewTargetState.hasExplicitEmail && !previewTargetState.matches) {
+          log(`步骤 ${step}：跳过第 ${index + 1} 封邮件，原因：列表预览中的目标邮箱与当前轮不一致。目标=${targetEmail || '未设置'}；预览：${previewSummary}`, 'warn');
           continue;
         }
 
         const previewCode = extractVerificationCode(previewText, strictChatGPTCodeOnly);
         const openedText = await openMailAndDeleteAfterRead(item, step);
+        const openedSummary = buildMailPreviewSummary(openedText, 180);
         const openedTargetState = mail2925MatchTargetEmail
           ? getTargetEmailMatchState(openedText, targetEmail)
           : { matches: true, hasExplicitEmail: false };
         if (mail2925MatchTargetEmail && openedTargetState.hasExplicitEmail && !openedTargetState.matches) {
+          log(`步骤 ${step}：第 ${index + 1} 封邮件正文已打开，但目标邮箱不匹配。目标=${targetEmail || '未设置'}；正文摘要：${openedSummary}`, 'warn');
           continue;
         }
         const bodyCode = extractVerificationCode(openedText, strictChatGPTCodeOnly);
         const candidateCode = bodyCode || previewCode;
 
         if (!candidateCode) {
+          log(`步骤 ${step}：第 ${index + 1} 封邮件已打开，但未提取到验证码。预览码=${previewCode || '无'}；正文摘要：${openedSummary}`, 'warn');
           continue;
         }
 
         if (excludedCodeSet.has(candidateCode)) {
-          log(`步骤 ${step}：跳过排除的验证码：${candidateCode}`, 'info');
+          log(`步骤 ${step}：第 ${index + 1} 封邮件提取到验证码 ${candidateCode}，但该验证码已在排除列表中。`, 'info');
           continue;
         }
         if (seenCodes.has(candidateCode)) {
-          log(`步骤 ${step}：跳过已处理过的验证码：${candidateCode}`, 'info');
+          log(`步骤 ${step}：第 ${index + 1} 封邮件提取到验证码 ${candidateCode}，但该验证码已处理过。`, 'info');
           continue;
         }
 
