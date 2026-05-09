@@ -2654,6 +2654,10 @@ function isLikelyLoggedInChatgptHomeUrl(rawUrl = location.href) {
       return false;
     }
 
+    if (/^\/c\/[a-f0-9-]+(?:[/?#]|$)/i.test(path)) {
+      return true;
+    }
+
     const signupTrigger = typeof findSignupEntryTrigger === 'function'
       ? findSignupEntryTrigger()
       : null;
@@ -2708,6 +2712,10 @@ function isLikelyLoggedInChatgptHomeUrl(rawUrl = location.href) {
         /项目|projects?/i,
         /今天有什么计划|what'?s?\s+on\s+the\s+agenda/i,
         /有问题，尽管问|ask\s+anything/i,
+        /你已准备就绪|you'?re\s+ready/i,
+        /好的[，,\s]*开始吧|okay[，,\s]*let'?s\s+go|get\s+started/i,
+        /请勿共享敏感信息|don'?t\s+share\s+sensitive\s+info/i,
+        /请核实你的信息|check\s+your\s+information/i,
       ];
       const matchedSignals = loggedInHomeSignals.filter((pattern) => pattern.test(bodyText));
       if (matchedSignals.length >= 2) {

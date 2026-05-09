@@ -477,6 +477,52 @@ test('message router treats step 3 as completed when finalize fails but page alr
   assert.deepStrictEqual(response, { ok: true });
 });
 
+test('message router treats step 3 as completed when finalize and fallback transport both race but tab url already reached chatgpt conversation', async () => {
+  const { router, events } = createRouter({
+    finalizeStep3Completion: async () => {
+      throw new Error('Could not establish connection. Receiving end does not exist.');
+    },
+    sendToContentScriptResilient: async () => {
+      throw new Error('Could not establish connection. Receiving end does not exist.');
+    },
+    getTabId: async (source) => (source === 'signup-page' ? 88 : null),
+  });
+
+  global.chrome = {
+    tabs: {
+      get: async (tabId) => ({
+        id: tabId,
+        url: 'https://chatgpt.com/c/69fed866-3b5c-83ec-b995-72e26d8196f4',
+      }),
+    },
+  };
+
+  const response = await router.handleMessage({
+    type: 'STEP_COMPLETE',
+    step: 3,
+    source: 'signup-page',
+    payload: {
+      email: 'user@example.com',
+    },
+  }, {});
+
+  assert.deepStrictEqual(events.stepStatuses, [{ step: 3, status: 'completed' }]);
+  assert.equal(
+    events.logs.some(({ message, step }) => /步骤 3：密码提交后的收尾确认失败，但当前页面已进入 logged_in_home/.test(message) && step === 3),
+    true
+  );
+  assert.deepStrictEqual(events.notifyErrors, []);
+  assert.deepStrictEqual(events.notifyCompletions, [
+    {
+      step: 3,
+      payload: {
+        email: 'user@example.com',
+      },
+    },
+  ]);
+  assert.deepStrictEqual(response, { ok: true });
+});
+
 test('message router does not duplicate step 3 mismatch failure log after finalize already failed', async () => {
   const mismatchError = 'SIGNUP_PHONE_PASSWORD_MISMATCH::步骤 3：检测到注册手机号或密码不正确，需要重新开始当前轮。页面提示：Incorrect phone number or password';
   const state = {

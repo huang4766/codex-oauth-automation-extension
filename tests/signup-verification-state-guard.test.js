@@ -148,6 +148,58 @@ return {
   assert.equal(api.run(), true);
 });
 
+test('chatgpt conversation onboarding overlay is treated as logged_in_home', () => {
+const api = new Function(`
+const location = { href: 'https://chatgpt.com/c/69fed866-3b5c-83ec-b995-72e26d8196f4' };
+const document = {
+  body: {
+    innerText: 'ChatGPT 入门技巧 请勿共享敏感信息 请核实你的信息 好的，开始吧',
+    textContent: 'ChatGPT 入门技巧 请勿共享敏感信息 请核实你的信息 好的，开始吧',
+  },
+  querySelectorAll(selector) {
+    if (selector === 'a, button, [role="button"], [role="link"], input[type="button"], input[type="submit"]') {
+      return [];
+    }
+    return [];
+  },
+};
+
+function findSignupEntryTrigger() {
+  return null;
+}
+
+function getActionText(el) {
+  return [el?.textContent, el?.value, el?.getAttribute?.('aria-label'), el?.getAttribute?.('title')]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\\s+/g, ' ')
+    .trim();
+}
+
+function getPageTextSnapshot() {
+  return String(document.body?.innerText || document.body?.textContent || '').replace(/\\s+/g, ' ').trim();
+}
+
+function isVisibleElement() {
+  return true;
+}
+
+function isActionEnabled(el) {
+  return Boolean(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+}
+
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+
+return {
+  run() {
+    return isLikelyLoggedInChatgptHomeUrl();
+  },
+};
+`)();
+
+  assert.equal(api.run(), true);
+});
+
 test('signup verification state should prioritize retry error page over verification visibility', () => {
   const api = new Function(`
 const location = {

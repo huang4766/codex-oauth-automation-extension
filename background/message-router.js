@@ -522,7 +522,55 @@
         || normalized === 'logged_in_home';
     }
 
+    function inspectStep3UrlFallbackState(url = '') {
+      const raw = String(url || '').trim();
+      if (!raw) {
+        return null;
+      }
+
+      try {
+        const parsed = new URL(raw);
+        const host = String(parsed.hostname || '').toLowerCase();
+        const path = String(parsed.pathname || '');
+
+        if (!['chatgpt.com', 'www.chatgpt.com', 'chat.openai.com'].includes(host)) {
+          return null;
+        }
+
+        if (/^\/c\/[a-f0-9-]+(?:[/?#]|$)/i.test(path)) {
+          return {
+            state: 'logged_in_home',
+            url: raw,
+            via: 'tab_url_conversation',
+          };
+        }
+
+        if (/^\/(?:[?#].*)?$/i.test(path) || path === '/') {
+          return {
+            state: 'logged_in_home',
+            url: raw,
+            via: 'tab_url_home',
+          };
+        }
+      } catch {
+        return null;
+      }
+
+      return null;
+    }
+
     async function inspectStep3PostSubmitFallback() {
+      if (typeof getTabId === 'function') {
+        const signupTabId = await getTabId('signup-page');
+        if (Number.isInteger(signupTabId) && signupTabId > 0 && typeof chrome !== 'undefined' && chrome?.tabs?.get) {
+          const signupTab = await chrome.tabs.get(signupTabId).catch(() => null);
+          const urlFallbackState = inspectStep3UrlFallbackState(signupTab?.url || '');
+          if (urlFallbackState) {
+            return urlFallbackState;
+          }
+        }
+      }
+
       if (typeof sendToContentScriptResilient !== 'function') {
         return null;
       }
