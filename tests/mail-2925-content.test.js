@@ -1110,9 +1110,15 @@ const window = {
   },
 };
 
+const operationDelayCalls = [];
+
 async function sleep() {}
 function simulateClick(node) {
   node.click();
+}
+async function performOperationWithDelay(metadata, operation) {
+  operationDelayCalls.push({ label: metadata.label, kind: metadata.kind });
+  return await operation();
 }
 
 ${bundle}
@@ -1120,6 +1126,7 @@ ${bundle}
 return {
   rememberCheckbox,
   agreementCheckbox,
+  operationDelayCalls,
   ensureAgreementChecked,
 };
 `)();
@@ -1129,4 +1136,8 @@ return {
   assert.equal(result, true);
   assert.equal(api.rememberCheckbox.checked, true);
   assert.equal(api.agreementCheckbox.checked, true);
+  assert.deepStrictEqual(api.operationDelayCalls, [
+    { label: 'mail2925-agreement-checkbox', kind: 'click' },
+    { label: 'mail2925-agreement-checkbox', kind: 'click' },
+  ]);
 });
