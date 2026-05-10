@@ -873,6 +873,27 @@ function getTargetEmailMatchState(text, targetEmail) {
   };
 }
 
+function shouldAllowCloudflarePreviewTargetFallback(previewText, targetEmail) {
+  const normalizedPreview = String(previewText || '').toLowerCase();
+  const normalizedTarget = String(targetEmail || '').trim().toLowerCase();
+  if (!normalizedPreview || !normalizedTarget || !normalizedTarget.includes('@')) {
+    return false;
+  }
+
+  const targetDomain = normalizedTarget.split('@').pop() || '';
+  if (!targetDomain) {
+    return false;
+  }
+
+  const hasCloudflareForwardMarker = normalizedPreview.includes('cfbounces')
+    || normalizedPreview.includes('代发');
+  if (!hasCloudflareForwardMarker) {
+    return false;
+  }
+
+  return normalizedPreview.includes(`@${targetDomain}`);
+}
+
 function normalizeMinuteTimestamp(timestamp) {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return 0;
   const date = new Date(timestamp);
@@ -1260,6 +1281,7 @@ async function handlePollEmail(step, payload) {
     }
 
     const items = findMailItems();
+    const lookbackFallbackCandidates = [];
     if (items.length > 0) {
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index];
@@ -1267,13 +1289,17 @@ async function handlePollEmail(step, payload) {
         const itemMinute = normalizeMinuteTimestamp(itemTimestamp || 0);
         const previewText = getMailItemText(item);
         const previewSummary = buildMailPreviewSummary(previewText);
+        const previewMatchesFilters = matchesMailFilters(previewText, senderFilters, subjectFilters);
 
         if (filterAfterMinute && (!itemMinute || itemMinute < filterAfterMinute)) {
+          if (previewMatchesFilters) {
+            lookbackFallbackCandidates.push({ item, index, previewText, previewSummary, itemTimestamp });
+          }
           log(`步骤 ${step}：跳过第 ${index + 1} 封邮件，原因：时间早于筛选窗口。预览：${previewSummary}`, 'info');
           continue;
         }
 
-        if (!matchesMailFilters(previewText, senderFilters, subjectFilters)) {
+        if (!previewMatchesFilters) {
           log(`步骤 ${step}：跳过第 ${index + 1} 封邮件，原因：未命中发件人/主题筛选。预览：${previewSummary}`, 'info');
           continue;
         }
@@ -1282,8 +1308,12 @@ async function handlePollEmail(step, payload) {
           ? getTargetEmailMatchState(previewText, targetEmail)
           : { matches: true, hasExplicitEmail: false };
         if (mail2925MatchTargetEmail && previewTargetState.hasExplicitEmail && !previewTargetState.matches) {
-          log(`步骤 ${step}：跳过第 ${index + 1} 封邮件，原因：列表预览中的目标邮箱与当前轮不一致。目标=${targetEmail || '未设置'}；预览：${previewSummary}`, 'warn');
-          continue;
+          if (shouldAllowCloudflarePreviewTargetFallback(previewText, targetEmail)) {
+            log(`步骤 ${step}：第 ${index + 1} 封邮件的列表预览目标邮箱与当前轮不一致，但检测到 Cloudflare 转发痕迹，仍将打开正文继续确认。目标=${targetEmail || '未设置'}；预览：${previewSummary}`, 'warn');
+          } else {
+            log(`步骤 ${step}：跳过第 ${index + 1} 封邮件，原因：列表预览中的目标邮箱与当前轮不一致。目标=${targetEmail || '未设置'}；预览：${previewSummary}`, 'warn');
+            continue;
+          }
         }
 
         const previewCode = extractVerificationCode(previewText, strictChatGPTCodeOnly);
@@ -1319,6 +1349,52 @@ async function handlePollEmail(step, payload) {
         const timeLabel = itemTimestamp ? `，时间：${new Date(itemTimestamp).toLocaleString('zh-CN', { hour12: false })}` : '';
         log(`步骤 ${step}：已找到验证码：${candidateCode}（来源：${source}${timeLabel}）`, 'ok');
         return { ok: true, code: candidateCode, emailTimestamp: Date.now() };
+      }
+
+      if (filterAfterMinute && lookbackFallbackCandidates.length > 0) {
+        log(`步骤 ${step}：当前筛选窗口内未命中可用验证码，开始回扫 ${lookbackFallbackCandidates.length} 封超时间窗但命中筛选的邮件。`, 'warn');
+        for (const candidate of lookbackFallbackCandidates) {
+          const {
+            item,
+            index,
+            previewText,
+            previewSummary,
+            itemTimestamp,
+          } = candidate;
+          const previewCode = extractVerificationCode(previewText, strictChatGPTCodeOnly);
+          log(`步骤 ${step}：回扫第 ${index + 1} 封超时间窗邮件，准备打开正文。预览：${previewSummary}`, 'warn');
+          const openedText = await openMailAndDeleteAfterRead(item, step);
+          const openedSummary = buildMailPreviewSummary(openedText, 180);
+          const openedTargetState = mail2925MatchTargetEmail
+            ? getTargetEmailMatchState(openedText, targetEmail)
+            : { matches: true, hasExplicitEmail: false };
+          if (mail2925MatchTargetEmail && openedTargetState.hasExplicitEmail && !openedTargetState.matches) {
+            log(`步骤 ${step}：回扫第 ${index + 1} 封邮件时发现目标邮箱不匹配。目标=${targetEmail || '未设置'}；正文摘要：${openedSummary}`, 'warn');
+            continue;
+          }
+
+          const bodyCode = extractVerificationCode(openedText, strictChatGPTCodeOnly);
+          const candidateCode = bodyCode || previewCode;
+          if (!candidateCode) {
+            log(`步骤 ${step}：回扫第 ${index + 1} 封邮件后仍未提取到验证码。预览码=${previewCode || '无'}；正文摘要：${openedSummary}`, 'warn');
+            continue;
+          }
+          if (excludedCodeSet.has(candidateCode)) {
+            log(`步骤 ${step}：回扫第 ${index + 1} 封邮件提取到验证码 ${candidateCode}，但该验证码已在排除列表中。`, 'info');
+            continue;
+          }
+          if (seenCodes.has(candidateCode)) {
+            log(`步骤 ${step}：回扫第 ${index + 1} 封邮件提取到验证码 ${candidateCode}，但该验证码已处理过。`, 'info');
+            continue;
+          }
+
+          seenCodes.add(candidateCode);
+          persistSeenCodes();
+          const source = bodyCode ? '邮件正文（超时间窗回扫）' : '邮件预览（超时间窗回扫）';
+          const timeLabel = itemTimestamp ? `，时间：${new Date(itemTimestamp).toLocaleString('zh-CN', { hour12: false })}` : '';
+          log(`步骤 ${step}：已找到验证码：${candidateCode}（来源：${source}${timeLabel}）`, 'ok');
+          return { ok: true, code: candidateCode, emailTimestamp: Date.now() };
+        }
       }
     }
 
