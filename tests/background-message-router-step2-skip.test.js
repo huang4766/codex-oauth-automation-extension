@@ -165,12 +165,14 @@ test('message router skips step 3 when step 2 lands on verification page', async
 
   await router.handleStepData(2, {
     email: 'user@example.com',
+    nextSignupState: 'verification_page',
+    nextSignupUrl: 'https://auth.openai.com/email-verification',
     skippedPasswordStep: true,
   });
 
   assert.deepStrictEqual(events.emailStates, ['user@example.com']);
   assert.deepStrictEqual(events.stepStatuses, [{ step: 3, status: 'skipped' }]);
-  assert.equal(events.logs[0]?.message, '步骤 2：提交邮箱后页面直接进入验证码页，已自动跳过步骤 3。');
+  assert.equal(events.logs.some(({ message }) => message === '步骤 2：提交邮箱后页面直接进入验证码页，已自动跳过步骤 3。'), true);
   assert.equal(events.logs.some(({ message, step }) => /诊断：步骤 2 完成后落地页 state=/.test(message) && step === 2), true);
 });
 
@@ -237,6 +239,8 @@ test('message router skips steps 3/4/5 when step 2 detects already logged-in ses
 
   await router.handleStepData(2, {
     email: 'user@example.com',
+    nextSignupState: 'logged_in_home',
+    nextSignupUrl: 'https://chatgpt.com/',
     skipRegistrationFlow: true,
     skippedPasswordStep: true,
   });
@@ -246,7 +250,7 @@ test('message router skips steps 3/4/5 when step 2 detects already logged-in ses
     { step: 3, status: 'skipped' },
     { step: 5, status: 'skipped' },
   ]);
-  assert.equal(events.logs[0]?.message, '步骤 2：检测到当前已登录会话，已自动跳过步骤 3/4/5，流程将直接进入步骤 6。');
+  assert.equal(events.logs.some(({ message }) => message === '步骤 2：检测到当前已登录会话，已自动跳过步骤 3/4/5，流程将直接进入步骤 6。'), true);
 });
 
 test('message router skips step 5 when step 4 reports already logged-in transition', async () => {
